@@ -5,48 +5,113 @@ import csv
 import xlwt
 from datetime import datetime
 
-def initParser():
+
+def init_parser():
     parser = argparse.ArgumentParser(description='Differences between tables')
-    parser.add_argument('address1', type=str, help='first csv file address')
-    parser.add_argument('address2', type=str, help='second csv file address')
-    parser.add_argument('--pkey', type=str, help='primary key', nargs='+')
-    return(parser)
+    parser.add_argument('first_address', type=str, help='first csv file address')
+    parser.add_argument('second_address', type=str, help='second csv file address')
+    parser.add_argument('--index', type=str, help='indexes or primary keys', nargs='+')
+    return parser
 
-def parseCsvFile(address, primary_keys):
 
-    dict = {}
+def parse_csv_file(address, index):
+    table = {}
     with open(address, 'rb') as csvfile:
-        reader = csv.DictReader(csvfile, delimiter='\t', quoting=csv.QUOTE_NONE)
+        reader = csv.DictReader(csvfile, delimiter='\t')
+        header_array = reader.fieldnames
+        header = create_header_with_type(address, header_array)
 
-        header = reader.fieldnames
-        sorted_header = primary_keys + sorted(set(header).difference(primary_keys))
-
+        indexes = []
         for row in reader:
-            pkeys_value = []
-            if primary_keys is None:
+            new_row = {}
+            index_value = []
+            if index is None:
                 for key in row:
-                    pkeys_value.append(row[key])
+                    for column in header:
+                        if key == column:
+                            new_value = format_type(row[key], header[column])
+                            index_value.append(new_value)
+                            new_row[key] = new_value
+                table[tuple(index_value)] = [new_row]
             else:
                 for key in row:
-                    if key in primary_keys:
-                        pkeys_value.append(row[key])
-            dict [tuple(pkeys_value)] = row
-        return(dict, sorted_header)
+                    for column in header:
+                        if key == column:
+                            new_value = format_type(row[key], header[column])
+                            new_row[key] = new_value
+                            if key in index:
+                                index_value.append(new_value)
+                if tuple(index_value) not in indexes:
+                    indexes.append(tuple(index_value))
+                    table[tuple(index_value)] = [new_row]
+                else:
+                    table[tuple(index_value)] += [new_row]
 
-def parseDate(date):
+        if index is not None:
+            sorted_header = index + sorted(set(header).difference(index))
+        else:
+            sorted_header = header
+        return table, sorted_header
+
+
+def create_header_with_type(address, header_array):
+    with open(address, 'rb') as csvfile:
+        reader = csv.DictReader(csvfile, delimiter='\t')
+        header = {}
+        for row in reader:
+            for key in row:
+                for column_name in header_array:
+                    if key == column_name:
+                        header[column_name] = parse_type(row[key])
+            break
+    return header
+
+
+def parse_type(data):
     try:
-        return datetime.strptime(date, "%Y-%m-%d")
+        datetime.strptime(data, "%Y-%m-%d")
+        return 'date'
     except ValueError:
         try:
-            return datetime.strptime(date, "%Y-%m-%d %H:%M:%S")
+            datetime.strptime(data, "%Y-%m-%d %H:%M:%S")
+            return 'datetime'
         except ValueError:
-            return False
+            try:
+                float(data.replace(',', '.'))
+                return 'float'
+            except ValueError:
+                return 'string'
 
 
-def diffSearch(f_table, s_table, f_ext_key, s_ext_key, primary_keys, header):
+def format_type(data, data_type):
+    try:
+        if data_type == 'date':
+            new_data = datetime.strptime(data, "%Y-%m-%d")
+        elif data_type == 'datetime':
+            new_data = datetime.strptime(data, "%Y-%m-%d %H:%M:%S")
+        elif data_type == 'float':
+            new_data = float(data.replace(',', '.'))
+        else:
+            new_data = data
+    except ValueError:
+        new_data = 'Error!'
+    return new_data
 
+
+
+def create_data_with_type(table, header):
+    for index in table:
+        for row in table[index]:
+            for key in row:
+                for column_name in header:
+                    if key == column_name:
+                        dict(row[key])
+
+
+def diff_search(a, b, primary_keys, header):
     wrong_data_style = xlwt.easyxf(
-        'borders: left thin, right thin, top thin, bottom thin; pattern: pattern solid, fore_colour coral; font: bold on, colour white')
+        'borders: left thin, right thin, top thin, bottom thin; pattern: pattern solid, fore_colour coral; '
+        'font: bold on, colour white')
     right_data_style = xlwt.easyxf(
         'borders: left thin, right thin, top thin, bottom thin;pattern: pattern solid, fore_colour light_green;')
     missing_data_style = xlwt.easyxf(
@@ -55,82 +120,124 @@ def diffSearch(f_table, s_table, f_ext_key, s_ext_key, primary_keys, header):
         'borders: left thin, right thin, top thin, bottom thin;pattern: pattern solid, fore_colour light_turquoise;')
 
     data = {}
-    for f_key in f_table[f_ext_key].keys():
+    for f_key in a:
         if f_key in primary_keys:
-            data.update({f_key: {'value': f_table[f_ext_key].get(f_key), 'style': primary_key_style}})
+            data[f_key] = {'value': a[f_key], 'style': primary_key_style}
         else:
-            for s_key in s_table[s_ext_key].keys():
+            for s_key in b:
                 if f_key == s_key and f_key in header:
-                    if f_table[f_ext_key].get(f_key) == s_table[s_ext_key].get(s_key):
-                        data.update({f_key: {'value': 0, 'style': right_data_style}})
+                    if a[f_key] == b[s_key]:
+                        data[f_key] = {'value': 0, 'style': right_data_style}
                     else:
                         try:
-                            value = float(f_table[f_ext_key].get(f_key).replace(',', '.')) - float(s_table[s_ext_key].get(s_key).replace(',', '.'))
-                            if value == 0:
-                                style = right_data_style
+                            value = a[f_key] - b[s_key]
+                            style = wrong_data_style
+                            data[f_key] = {'value': value, 'style': style}
+                        except TypeError:
+                            if a[f_key] is '':
+                                data[f_key] = {'value': b[s_key], 'style': missing_data_style}
+                            elif b[s_key] is '':
+                                data[f_key] = {'value': a[f_key], 'style': missing_data_style}
                             else:
-                                style = wrong_data_style
-                            data.update({f_key: {'value': value, 'style': style}})
-                        except ValueError:
-                            try:
-                                if f_table[f_ext_key].get(f_key) is '':
-                                    data.update(
-                                        {f_key: {'value': str(parseDate(s_table[s_ext_key].get(s_key))), 'style': missing_data_style}})
-                                elif s_table[s_ext_key].get(s_key) is '':
-                                    data.update(
-                                        {f_key: {'value': str(parseDate(f_table[f_ext_key].get(f_key))), 'style': missing_data_style}})
-                                else:
-                                    if parseDate(f_table[f_ext_key].get(f_key)) == parseDate(s_table[s_ext_key].get(s_key)):
-                                        data.update(
-                                            {f_key: {'value': str(parseDate(f_table[f_ext_key].get(f_key))), 'style': right_data_style}})
-                                    else:
-                                        data.update({f_key: {'value': str(parseDate(f_table[f_ext_key].get(f_key)) - parseDate(s_table[s_ext_key].get(s_key))),
-                                                         'style': wrong_data_style}})
-                            except ValueError:
-                                data.update({f_key: {'value': 'wrong string', 'style': wrong_data_style}})
-    return(data)
+                                data[f_key] = {'value': 'wrong string', 'style': wrong_data_style}
+    return (data)
 
-def createDiffTable(f_table, s_table, primary_keys, header):
 
-    header_style = xlwt.easyxf(
-        'borders: left thin, right thin, top thin, bottom thin; pattern: pattern solid, fore_colour sea_green; font: bold on, colour white')
-
+def create_diff_table(f_table, s_table, primary_keys, header):
     book = xlwt.Workbook()
     sheet = book.add_sheet("Table")
+    row_index = 1
+
+    header_style = xlwt.easyxf(
+        'borders: left thin, right thin, top thin, bottom thin; pattern: pattern solid, fore_colour sea_green; '
+        'font: bold on, colour white')
+    missing_data_style = xlwt.easyxf(
+        'borders: left thin, right thin, top thin, bottom thin;pattern: pattern solid, fore_colour light_yellow;')
+    right_data_style = xlwt.easyxf(
+        'borders: left thin, right thin, top thin, bottom thin;pattern: pattern solid, fore_colour light_green;')
+
+    def writeRow(row, style, row_index):
+        for key in row:
+            for index, col in enumerate(header):
+                if key == col:
+                    value = row[key]
+                    sheet.write(row_index, index, value, style)
+        row_index = row_index + 1
+        return row_index
 
     for index, col in enumerate(header):
         sheet.write(0, index, col, header_style)
 
-    row_index = 1
-    while row_index  < len(f_table):
-
+    if primary_keys is None:
+        used_keys = []
         for f_ext_key in f_table:
             for s_ext_key in s_table:
                 if f_ext_key == s_ext_key:
-                    data = diffSearch(f_table, s_table, f_ext_key, s_ext_key, primary_keys, header)
-                    for index, col in enumerate(header):
-                        for colomn in data:
-                            if colomn == col:
-                                in_data = data.get(colomn)
-                                value = in_data.get('value')
-                                style = in_data.get('style')
-                                sheet.write(row_index, index, value, style)
-                    row_index = row_index +1
+                    used_keys.append(f_ext_key)
+                    for row in f_table[f_ext_key]:
+                        row_index = writeRow(row, right_data_style, row_index)
+        for f_ext_key in f_table:
+            if f_ext_key not in used_keys:
+                for f_row in f_table[f_ext_key]:
+                    row_index = writeRow(f_row, missing_data_style, row_index)
+        for s_ext_key in s_table:
+            if s_ext_key not in used_keys:
+                for s_row in s_table[s_ext_key]:
+                    row_index = writeRow(s_row, missing_data_style, row_index)
+
+    else:
+        used_keys = []
+        for f_ext_key in f_table:
+            for s_ext_key in s_table:
+                if f_ext_key == s_ext_key:
+                    if len(f_table[f_ext_key]) == 1 and len(f_table[f_ext_key]) == 1:
+                        used_keys.append(f_ext_key)
+                        data = diff_search(f_table[f_ext_key][0], s_table[s_ext_key][0], primary_keys, header)
+                        for index, col in enumerate(header):
+                            for column in data:
+                                if column == col:
+                                    in_data = data[column]
+                                    value = in_data['value']
+                                    style = in_data['style']
+                                    sheet.write(row_index, index, value, style)
+                        row_index = row_index + 1
+                    else:
+                        used_keys.append(f_ext_key)
+                        used_values = []
+                        for f_row in f_table[f_ext_key]:
+                            for s_row in s_table[s_ext_key]:
+                                if f_row == s_row:
+                                    row_index = writeRow(f_row, right_data_style, row_index)
+                                    used_values.append(f_row)
+                        for f_row in f_table[f_ext_key]:
+                            if f_row not in used_values:
+                                row_index = writeRow(f_row, missing_data_style, row_index)
+                                used_values.append(f_row)
+                        for s_row in s_table[s_ext_key]:
+                            if s_row not in used_values:
+                                row_index = writeRow(s_row, missing_data_style, row_index)
+                                used_values.append(s_row)
+        for f_ext_key in f_table:
+            if f_ext_key not in used_keys:
+                for f_row in f_table[f_ext_key]:
+                    if f_row not in used_values:
+                        row_index = writeRow(f_row, missing_data_style, row_index)
+        for s_ext_key in s_table:
+            if s_ext_key not in used_keys:
+                for s_row in s_table[s_ext_key]:
+                    if s_row not in used_values:
+                        row_index = writeRow(s_row, missing_data_style, row_index)
 
     book.save("table.xls")
 
+
 def main():
+    args = init_parser().parse_args()
 
-    args = initParser().parse_args()
+    first_table, header_array = parse_csv_file(args.first_address, args.index)
+    second_table, header_array = parse_csv_file(args.second_address, args.index)
+    create_diff_table(first_table, second_table, args.index, header_array)
 
-    first_table, header = parseCsvFile(args.address1, args.pkey)
-    second_table, header = parseCsvFile(args.address2, args.pkey)
-
-    createDiffTable(first_table, second_table, args.pkey, header)
 
 if __name__ == '__main__':
     main()
-
-
-
-
