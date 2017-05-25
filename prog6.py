@@ -38,9 +38,9 @@ def parse_csv_file(address, index):
                     for column in header:
                         if key == column:
                             new_value = format_type(row[key], header[column])
-                            new_row[key] = new_value
                             if key in index:
                                 index_value.append(new_value)
+                            new_row[key] = new_value
                 if tuple(index_value) not in indexes:
                     indexes.append(tuple(index_value))
                     table[tuple(index_value)] = [new_row]
@@ -98,7 +98,6 @@ def format_type(data, data_type):
     return new_data
 
 
-
 def create_data_with_type(table, header):
     for index in table:
         for row in table[index]:
@@ -130,9 +129,7 @@ def diff_search(a, b, primary_keys, header):
                         data[f_key] = {'value': 0, 'style': right_data_style}
                     else:
                         try:
-                            value = a[f_key] - b[s_key]
-                            style = wrong_data_style
-                            data[f_key] = {'value': value, 'style': style}
+                            data[f_key] = {'value': a[f_key] - b[s_key], 'style': wrong_data_style}
                         except TypeError:
                             if a[f_key] is '':
                                 data[f_key] = {'value': b[s_key], 'style': missing_data_style}
@@ -140,14 +137,13 @@ def diff_search(a, b, primary_keys, header):
                                 data[f_key] = {'value': a[f_key], 'style': missing_data_style}
                             else:
                                 data[f_key] = {'value': 'wrong string', 'style': wrong_data_style}
-    return (data)
+    return data
 
 
 def create_diff_table(f_table, s_table, primary_keys, header):
     book = xlwt.Workbook()
     sheet = book.add_sheet("Table")
     row_index = 1
-
     header_style = xlwt.easyxf(
         'borders: left thin, right thin, top thin, bottom thin; pattern: pattern solid, fore_colour sea_green; '
         'font: bold on, colour white')
@@ -156,14 +152,21 @@ def create_diff_table(f_table, s_table, primary_keys, header):
     right_data_style = xlwt.easyxf(
         'borders: left thin, right thin, top thin, bottom thin;pattern: pattern solid, fore_colour light_green;')
 
-    def writeRow(row, style, row_index):
+    def write_row(row, style, row_index):
         for key in row:
-            for index, col in enumerate(header):
-                if key == col:
+            for i, column in enumerate(header):
+                if key == column:
                     value = row[key]
-                    sheet.write(row_index, index, value, style)
-        row_index = row_index + 1
-        return row_index
+                    sheet.write(row_index, i, value, style)
+        new_row_index = row_index + 1
+        return new_row_index
+
+    def write_missing_row(table, row_i, used_v):
+        for row in table:
+            if row not in used_v:
+                row_i = write_row(row, missing_data_style, row_i)
+                used_v.append(row)
+        return row_i, used_v
 
     for index, col in enumerate(header):
         sheet.write(0, index, col, header_style)
@@ -175,18 +178,19 @@ def create_diff_table(f_table, s_table, primary_keys, header):
                 if f_ext_key == s_ext_key:
                     used_keys.append(f_ext_key)
                     for row in f_table[f_ext_key]:
-                        row_index = writeRow(row, right_data_style, row_index)
+                        row_index = write_row(row, right_data_style, row_index)
         for f_ext_key in f_table:
             if f_ext_key not in used_keys:
                 for f_row in f_table[f_ext_key]:
-                    row_index = writeRow(f_row, missing_data_style, row_index)
+                    row_index = write_row(f_row, missing_data_style, row_index)
         for s_ext_key in s_table:
             if s_ext_key not in used_keys:
                 for s_row in s_table[s_ext_key]:
-                    row_index = writeRow(s_row, missing_data_style, row_index)
+                    row_index = write_row(s_row, missing_data_style, row_index)
 
     else:
         used_keys = []
+        used_values = []
         for f_ext_key in f_table:
             for s_ext_key in s_table:
                 if f_ext_key == s_ext_key:
@@ -207,28 +211,18 @@ def create_diff_table(f_table, s_table, primary_keys, header):
                         for f_row in f_table[f_ext_key]:
                             for s_row in s_table[s_ext_key]:
                                 if f_row == s_row:
-                                    row_index = writeRow(f_row, right_data_style, row_index)
+                                    row_index = write_row(f_row, right_data_style, row_index)
                                     used_values.append(f_row)
-                        for f_row in f_table[f_ext_key]:
-                            if f_row not in used_values:
-                                row_index = writeRow(f_row, missing_data_style, row_index)
-                                used_values.append(f_row)
-                        for s_row in s_table[s_ext_key]:
-                            if s_row not in used_values:
-                                row_index = writeRow(s_row, missing_data_style, row_index)
-                                used_values.append(s_row)
+                        row_index, used_values = write_missing_row(f_table[f_ext_key], row_index, used_values)
+                        row_index, used_values = write_missing_row(s_table[s_ext_key], row_index, used_values)
         for f_ext_key in f_table:
             if f_ext_key not in used_keys:
-                for f_row in f_table[f_ext_key]:
-                    if f_row not in used_values:
-                        row_index = writeRow(f_row, missing_data_style, row_index)
+                row_index, used_values = write_missing_row(f_table[f_ext_key], row_index, used_values)
         for s_ext_key in s_table:
             if s_ext_key not in used_keys:
-                for s_row in s_table[s_ext_key]:
-                    if s_row not in used_values:
-                        row_index = writeRow(s_row, missing_data_style, row_index)
-
+                row_index, used_values = write_missing_row(s_table[s_ext_key], row_index, used_values)
     book.save("table.xls")
+
 
 
 def main():
